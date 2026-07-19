@@ -1,4 +1,5 @@
 import ApplicationServices
+import Carbon.HIToolbox
 import Foundation
 
 private func winListEventTapCallback(
@@ -31,10 +32,46 @@ enum GlobalHotKeyError: LocalizedError {
     }
 }
 
-/// A session-level event tap catches the shortcut before the frontmost app.
-/// This is more predictable than the legacy Carbon hot-key dispatcher and also
-/// lets us suppress the original Fn+Space event after handling it.
+struct CommandTabSession {
+    private(set) var isActive = false
+    private var shouldSwallowTabKeyUp = false
+
+    mutating func begin() {
+        isActive = true
+        shouldSwallowTabKeyUp = true
+    }
+
+    mutating func consumeTabKeyUp() -> Bool {
+        guard shouldSwallowTabKeyUp else { return false }
+        shouldSwallowTabKeyUp = false
+        return true
+    }
+
+    mutating func commitOnCommandRelease() -> Bool {
+        guard isActive else { return false }
+        isActive = false
+        return true
+    }
+
+    mutating func cancel() -> Bool {
+        let wasActive = isActive
+        isActive = false
+        shouldSwallowTabKeyUp = false
+        return wasActive
+    }
+}
+
+/// A session-level event tap catches shortcuts before the frontmost app and Dock.
+/// Events are suppressed only while WinList is running, so the system Command-Tab
+/// switcher automatically returns when WinList exits.
 final class GlobalHotKey {
+    enum Action {
+        case toggle
+        case cycle(Int)
+        case commit
+        case cancel
+    }
+
     private static let relevantFlags: CGEventFlags = [
         .maskCommand,
         .maskControl,
@@ -45,14 +82,15 @@ final class GlobalHotKey {
 
     private let keyCode: CGKeyCode
     private let modifiers: CGEventFlags
-    private let callback: () -> Void
+    private let callback: (Action) -> Void
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var commandTabSession = CommandTabSession()
 
     init(
         keyCode: CGKeyCode,
         modifiers: CGEventFlags,
-        callback: @escaping () -> Void
+        callback: @escaping (Action) -> Void
     ) throws {
         guard AXIsProcessTrusted() else {
             throw GlobalHotKeyError.accessibilityPermissionRequired
@@ -62,7 +100,9 @@ final class GlobalHotKey {
         self.modifiers = modifiers.intersection(Self.relevantFlags)
         self.callback = callback
 
-        let eventMask = CGEventMask(1) << CGEventType.keyDown.rawValue
+        let eventMask = [CGEventType.keyDown, .keyUp, .flagsChanged].reduce(CGEventMask(0)) {
+            $0 | (CGEventMask(1) << $1.rawValue)
+        }
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -108,23 +148,62 @@ final class GlobalHotKey {
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
-            return Unmanaged.passUnretained(event)
-        }
-
-        guard type == .keyDown,
-              CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode)) == keyCode,
-              event.flags.intersection(Self.relevantFlags) == modifiers else {
-            return Unmanaged.passUnretained(event)
-        }
-
-        let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        if !isAutoRepeat {
-            DispatchQueue.main.async { [callback] in
-                callback()
+            if commandTabSession.cancel() {
+                dispatch(.cancel)
             }
+            return Unmanaged.passUnretained(event)
         }
 
-        // Swallow Fn+Space so the frontmost application does not also handle it.
-        return nil
+        let pressedKeyCode = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
+        let pressedModifiers = event.flags.intersection(Self.relevantFlags)
+
+        if type == .flagsChanged {
+            if !pressedModifiers.contains(.maskCommand),
+               commandTabSession.commitOnCommandRelease() {
+                dispatch(.commit)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        if type == .keyUp,
+           pressedKeyCode == CGKeyCode(kVK_Tab),
+           commandTabSession.consumeTabKeyUp() {
+            return nil
+        }
+
+        guard type == .keyDown else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if pressedKeyCode == keyCode, pressedModifiers == modifiers {
+            let isAutoRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            if !isAutoRepeat {
+                dispatch(.toggle)
+            }
+            return nil
+        }
+
+        if pressedKeyCode == CGKeyCode(kVK_Tab), isCommandTab(pressedModifiers) {
+            commandTabSession.begin()
+            dispatch(.cycle(pressedModifiers.contains(.maskShift) ? -1 : 1))
+            return nil
+        }
+
+        if pressedKeyCode == CGKeyCode(kVK_Escape), commandTabSession.cancel() {
+            dispatch(.cancel)
+            return nil
+        }
+
+        return Unmanaged.passUnretained(event)
+    }
+
+    private func isCommandTab(_ flags: CGEventFlags) -> Bool {
+        flags == [.maskCommand] || flags == [.maskCommand, .maskShift]
+    }
+
+    private func dispatch(_ action: Action) {
+        DispatchQueue.main.async { [callback] in
+            callback(action)
+        }
     }
 }

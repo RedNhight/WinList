@@ -18,3 +18,36 @@ final class SelectionNavigatorTests: XCTestCase {
         XCTAssertEqual(SelectionNavigator.movedIndex(current: 7, delta: 1, count: 0), 0)
     }
 }
+
+final class CommandTabSessionTests: XCTestCase {
+    func testBeginsAndCommitsOnCommandRelease() {
+        var session = CommandTabSession()
+
+        session.begin()
+
+        XCTAssertTrue(session.isActive)
+        XCTAssertTrue(session.commitOnCommandRelease())
+        XCTAssertFalse(session.isActive)
+        XCTAssertFalse(session.commitOnCommandRelease())
+    }
+
+    func testConsumesOnlyOneMatchingTabKeyUp() {
+        var session = CommandTabSession()
+
+        session.begin()
+
+        XCTAssertTrue(session.consumeTabKeyUp())
+        XCTAssertFalse(session.consumeTabKeyUp())
+    }
+
+    func testCancelPreventsCommit() {
+        var session = CommandTabSession()
+
+        session.begin()
+
+        XCTAssertTrue(session.cancel())
+        XCTAssertFalse(session.isActive)
+        XCTAssertFalse(session.commitOnCommandRelease())
+        XCTAssertFalse(session.consumeTabKeyUp())
+    }
+}

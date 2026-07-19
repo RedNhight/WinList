@@ -30,6 +30,26 @@ final class OverlayController: NSObject {
         isVisible ? hide() : show()
     }
 
+    func cycleSelection(by delta: Int) {
+        if !isVisible {
+            show()
+        }
+        model.moveSelection(by: delta)
+    }
+
+    func activateSelection() {
+        guard let selectedWindow = model.selectedWindow else {
+            hide()
+            return
+        }
+        hide()
+        windowService.activate(selectedWindow)
+    }
+
+    func cancelSelection() {
+        hide()
+    }
+
     func show() {
         let permissionGranted = AccessibilityPermission.isGranted
         model.replaceWindows(
@@ -83,9 +103,7 @@ final class OverlayController: NSObject {
         case .next:
             model.moveSelection(by: 1)
         case .activate:
-            guard let selectedWindow = model.selectedWindow else { return true }
-            hide()
-            windowService.activate(selectedWindow)
+            activateSelection()
         case .dismiss:
             hide()
         }

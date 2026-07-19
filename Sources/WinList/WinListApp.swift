@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         let showItem = NSMenuItem(
-            title: "Show WinList (fn + Space)",
+            title: "Show WinList (⌘Tab or fn + Space)",
             action: #selector(showSwitcher),
             keyEquivalent: ""
         )
@@ -90,8 +90,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hotKey = try GlobalHotKey(
                 keyCode: CGKeyCode(kVK_Space),
                 modifiers: .maskSecondaryFn
-            ) { [weak overlayController] in
-                overlayController?.toggle()
+            ) { [weak overlayController] action in
+                switch action {
+                case .toggle:
+                    overlayController?.toggle()
+                case .cycle(let delta):
+                    overlayController?.cycleSelection(by: delta)
+                case .commit:
+                    overlayController?.activateSelection()
+                case .cancel:
+                    overlayController?.cancelSelection()
+                }
             }
         } catch {
             showHotKeyError(error)
@@ -101,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showHotKeyError(_ error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Could Not Enable the fn + Space Shortcut"
+        alert.messageText = "Could Not Enable Global Shortcuts"
         alert.informativeText = "\(error.localizedDescription) Try turning WinList off and back on in Accessibility settings."
         alert.runModal()
     }
