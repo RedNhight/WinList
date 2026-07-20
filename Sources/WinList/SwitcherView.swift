@@ -3,6 +3,7 @@ import SwiftUI
 struct SwitcherView: View {
     @ObservedObject var model: SwitcherModel
     let onDismiss: () -> Void
+    let onToggleLayout: () -> Void
     let onOpenSettings: () -> Void
     let onActivate: (WindowItem) -> Void
 
@@ -49,12 +50,55 @@ struct SwitcherView: View {
         .frame(height: 52)
     }
 
+    @ViewBuilder
     private var windowList: some View {
+        switch model.layoutMode {
+        case .vertical:
+            verticalWindowList
+        case .horizontal:
+            horizontalWindowList
+        }
+    }
+
+    private var verticalWindowList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 5) {
                     ForEach(Array(model.windows.enumerated()), id: \.element.id) { index, window in
                         WindowRow(
+                            window: window,
+                            isSelected: index == model.selectedIndex
+                        )
+                        .id(window.id)
+                        .contentShape(Rectangle())
+                        .onHover { hovering in
+                            if hovering {
+                                model.selectedIndex = index
+                            }
+                        }
+                        .onTapGesture {
+                            model.selectedIndex = index
+                            onActivate(window)
+                        }
+                    }
+                }
+                .padding(8)
+            }
+            .onChange(of: model.selectedIndex) { index in
+                guard model.windows.indices.contains(index) else { return }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    proxy.scrollTo(model.windows[index].id, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private var horizontalWindowList: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 6) {
+                    ForEach(Array(model.windows.enumerated()), id: \.element.id) { index, window in
+                        HorizontalWindowTile(
                             window: window,
                             isSelected: index == model.selectedIndex
                         )
@@ -118,9 +162,81 @@ struct SwitcherView: View {
             ShortcutHint(keys: "↩", label: "open")
             Spacer()
             ShortcutHint(keys: "esc", label: "close")
+            Divider()
+                .frame(height: 20)
+            Button(action: onToggleLayout) {
+                Image(
+                    systemName: model.layoutMode == .vertical
+                        ? "rectangle.split.3x1"
+                        : "list.bullet"
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(
+                model.layoutMode == .vertical
+                    ? "Use horizontal layout"
+                    : "Use vertical layout"
+            )
         }
         .padding(.horizontal, 14)
         .frame(height: 42)
+    }
+}
+
+private struct HorizontalWindowTile: View {
+    let window: WindowItem
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 7) {
+            ZStack(alignment: .topTrailing) {
+                Image(nsImage: window.icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 50, height: 50)
+
+                if window.isMinimized {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 13))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .secondary)
+                        .offset(x: 5, y: -4)
+                }
+            }
+
+            Text(window.applicationName)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+
+            Text(window.title)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if window.isFocused {
+                Text("CURRENT")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tint)
+            } else {
+                Color.clear.frame(height: 10)
+            }
+        }
+        .padding(.horizontal, 9)
+        .frame(width: 138, height: 124)
+        .background {
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
+        }
+        .overlay {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+            }
+        }
     }
 }
 

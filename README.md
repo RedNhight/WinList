@@ -7,7 +7,9 @@ A lightweight native window switcher for macOS. It replaces the app-based `Comma
 - Lists open and minimized windows across macOS Spaces
 - Replaces `Command + Tab` while WinList is running
 - Highlights the currently focused window
+- Keeps windows in most-recently-used order
 - Supports keyboard navigation and single-click selection
+- Offers persistent vertical and horizontal layouts
 - Runs as a menu bar app without a Dock icon
 - Uses only native AppKit, SwiftUI, and Accessibility APIs
 

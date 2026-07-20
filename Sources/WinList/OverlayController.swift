@@ -83,6 +83,11 @@ final class OverlayController: NSObject {
         let view = SwitcherView(
             model: model,
             onDismiss: { [weak self] in self?.hide() },
+            onToggleLayout: { [weak self] in
+                guard let self else { return }
+                self.model.toggleLayout()
+                self.resizeAndPositionPanel(animated: true)
+            },
             onOpenSettings: {
                 AccessibilityPermission.request()
                 AccessibilityPermission.openSystemSettings()
@@ -110,18 +115,39 @@ final class OverlayController: NSObject {
         return true
     }
 
-    private func resizeAndPositionPanel() {
+    private func resizeAndPositionPanel(animated: Bool = false) {
         let rowCount = max(model.windows.count, 1)
-        let contentHeight = min(560, max(190, 84 + rowCount * 62))
-        let size = NSSize(width: 430, height: contentHeight)
         let screen = screenAtMousePointer() ?? NSScreen.main ?? NSScreen.screens.first
         guard let visibleFrame = screen?.visibleFrame else { return }
 
-        let origin = NSPoint(
-            x: visibleFrame.maxX - size.width - 22,
-            y: visibleFrame.maxY - size.height - 22
-        )
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        let frame: NSRect
+        switch model.layoutMode {
+        case .vertical:
+            let contentHeight = min(560, max(190, 84 + rowCount * 62))
+            let size = NSSize(width: 430, height: contentHeight)
+            frame = NSRect(
+                origin: NSPoint(
+                    x: visibleFrame.maxX - size.width - 22,
+                    y: visibleFrame.maxY - size.height - 22
+                ),
+                size: size
+            )
+        case .horizontal:
+            let width = min(
+                visibleFrame.width - 44,
+                max(430, CGFloat(rowCount * 146 + 32))
+            )
+            let size = NSSize(width: width, height: 238)
+            frame = NSRect(
+                origin: NSPoint(
+                    x: visibleFrame.midX - size.width / 2,
+                    y: visibleFrame.midY - size.height / 2
+                ),
+                size: size
+            )
+        }
+
+        panel.setFrame(frame, display: true, animate: animated)
     }
 
     private func screenAtMousePointer() -> NSScreen? {

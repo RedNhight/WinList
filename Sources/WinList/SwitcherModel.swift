@@ -1,6 +1,11 @@
 import Combine
 import Foundation
 
+enum SwitcherLayoutMode: String {
+    case vertical
+    case horizontal
+}
+
 enum SelectionNavigator {
     static func movedIndex(current: Int, delta: Int, count: Int) -> Int {
         guard count > 0 else { return 0 }
@@ -9,9 +14,21 @@ enum SelectionNavigator {
 }
 
 final class SwitcherModel: ObservableObject {
+    private static let layoutDefaultsKey = "switcherLayoutMode"
+
     @Published private(set) var windows: [WindowItem] = []
     @Published private(set) var hasAccessibilityPermission = false
+    @Published private(set) var layoutMode: SwitcherLayoutMode
     @Published var selectedIndex = 0
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        layoutMode = SwitcherLayoutMode(
+            rawValue: defaults.string(forKey: Self.layoutDefaultsKey) ?? ""
+        ) ?? .vertical
+    }
 
     var selectedWindow: WindowItem? {
         guard windows.indices.contains(selectedIndex) else { return nil }
@@ -30,5 +47,10 @@ final class SwitcherModel: ObservableObject {
             delta: delta,
             count: windows.count
         )
+    }
+
+    func toggleLayout() {
+        layoutMode = layoutMode == .vertical ? .horizontal : .vertical
+        defaults.set(layoutMode.rawValue, forKey: Self.layoutDefaultsKey)
     }
 }

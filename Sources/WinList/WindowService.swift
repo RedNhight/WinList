@@ -1,15 +1,54 @@
 import AppKit
 import ApplicationServices
 
+struct RecentOrdering<Key: Equatable> {
+    private(set) var keys: [Key] = []
+
+    mutating func synchronize(available: [Key], current: Key?) -> [Key] {
+        keys.removeAll { !available.contains($0) }
+
+        for key in available where !keys.contains(key) {
+            keys.append(key)
+        }
+
+        if let current {
+            promote(current)
+        }
+        return keys
+    }
+
+    mutating func promote(_ key: Key) {
+        keys.removeAll { $0 == key }
+        keys.insert(key, at: 0)
+    }
+}
+
+struct WindowIdentity: Hashable {
+    let processIdentifier: pid_t
+    fileprivate let element: AXUIElement
+
+    static func == (lhs: WindowIdentity, rhs: WindowIdentity) -> Bool {
+        lhs.processIdentifier == rhs.processIdentifier && CFEqual(lhs.element, rhs.element)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(processIdentifier)
+        hasher.combine(CFHash(element))
+    }
+}
+
 struct WindowItem: Identifiable {
-    let id = UUID()
+    let id: WindowIdentity
     let processIdentifier: pid_t
     let applicationName: String
     let title: String
     let icon: NSImage
     let isMinimized: Bool
     let isFocused: Bool
-    fileprivate let accessibilityElement: AXUIElement
+
+    fileprivate var accessibilityElement: AXUIElement {
+        id.element
+    }
 }
 
 enum AccessibilityPermission {
@@ -31,6 +70,8 @@ enum AccessibilityPermission {
 }
 
 final class WindowService {
+    private var recentWindows = RecentOrdering<WindowIdentity>()
+
     func windows() -> [WindowItem] {
         guard AccessibilityPermission.isGranted else { return [] }
 
@@ -68,6 +109,10 @@ final class WindowService {
 
                 result.append(
                     WindowItem(
+                        id: WindowIdentity(
+                            processIdentifier: application.processIdentifier,
+                            element: windowElement
+                        ),
                         processIdentifier: application.processIdentifier,
                         applicationName: application.localizedName ?? "Untitled App",
                         title: normalizedTitle(title, applicationName: application.localizedName),
@@ -76,14 +121,13 @@ final class WindowService {
                             accessibilityDescription: nil
                         ) ?? NSImage(),
                         isMinimized: minimized,
-                        isFocused: focused,
-                        accessibilityElement: windowElement
+                        isFocused: focused
                     )
                 )
             }
         }
 
-        return result.sorted { lhs, rhs in
+        let baseline = result.sorted { lhs, rhs in
             if lhs.isFocused != rhs.isFocused { return lhs.isFocused }
             if lhs.processIdentifier == frontmostPID, rhs.processIdentifier != frontmostPID { return true }
             if rhs.processIdentifier == frontmostPID, lhs.processIdentifier != frontmostPID { return false }
@@ -92,9 +136,18 @@ final class WindowService {
             }
             return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
         }
+
+        let orderedIdentities = recentWindows.synchronize(
+            available: baseline.map(\.id),
+            current: baseline.first(where: \.isFocused)?.id
+        )
+        return orderedIdentities.compactMap { identity in
+            baseline.first { $0.id == identity }
+        }
     }
 
     func activate(_ item: WindowItem) {
+        recentWindows.promote(item.id)
         let window = item.accessibilityElement
         if item.isMinimized {
             AXUIElementSetAttributeValue(
